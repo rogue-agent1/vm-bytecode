@@ -1,56 +1,69 @@
 #!/usr/bin/env python3
-"""Simple stack-based bytecode virtual machine."""
+"""Stack-based bytecode VM."""
 import sys
-
-PUSH, POP, ADD, SUB, MUL, DIV, MOD = 0x01, 0x02, 0x10, 0x11, 0x12, 0x13, 0x14
-DUP, SWAP, PRINT, HALT = 0x20, 0x21, 0x30, 0xFF
-JMP, JZ, JNZ = 0x40, 0x41, 0x42
-CMP_EQ, CMP_LT, CMP_GT = 0x50, 0x51, 0x52
-NAMES = {PUSH:'PUSH',POP:'POP',ADD:'ADD',SUB:'SUB',MUL:'MUL',DIV:'DIV',MOD:'MOD',
-         DUP:'DUP',SWAP:'SWAP',PRINT:'PRINT',HALT:'HALT',JMP:'JMP',JZ:'JZ',JNZ:'JNZ',
-         CMP_EQ:'EQ',CMP_LT:'LT',CMP_GT:'GT'}
-
+OP_PUSH,OP_POP,OP_ADD,OP_SUB,OP_MUL,OP_DIV,OP_MOD=range(7)
+OP_DUP,OP_SWAP,OP_PRINT,OP_HALT=range(7,11)
+OP_JMP,OP_JZ,OP_JNZ,OP_EQ,OP_LT,OP_GT=range(11,17)
+OP_LOAD,OP_STORE,OP_CALL,OP_RET=range(17,21)
+NAMES={v:k[3:] for k,v in globals().items() if k.startswith('OP_')}
 class VM:
-    def __init__(self):
-        self.stack = []; self.pc = 0; self.running = True
-    def run(self, program, trace=False):
-        self.pc = 0; self.running = True
-        while self.running and self.pc < len(program):
-            op = program[self.pc]
-            if trace: print(f"  [{self.pc:04d}] {NAMES.get(op,'?'):5s} stack={self.stack[-5:]}")
-            if op == PUSH: self.pc += 1; self.stack.append(program[self.pc])
-            elif op == POP: self.stack.pop()
-            elif op == ADD: b,a = self.stack.pop(),self.stack.pop(); self.stack.append(a+b)
-            elif op == SUB: b,a = self.stack.pop(),self.stack.pop(); self.stack.append(a-b)
-            elif op == MUL: b,a = self.stack.pop(),self.stack.pop(); self.stack.append(a*b)
-            elif op == DIV: b,a = self.stack.pop(),self.stack.pop(); self.stack.append(a//b)
-            elif op == MOD: b,a = self.stack.pop(),self.stack.pop(); self.stack.append(a%b)
-            elif op == DUP: self.stack.append(self.stack[-1])
-            elif op == SWAP: self.stack[-1],self.stack[-2] = self.stack[-2],self.stack[-1]
-            elif op == PRINT: print(f"  → {self.stack.pop()}")
-            elif op == JMP: self.pc = program[self.pc+1]; continue
-            elif op == JZ: self.pc = program[self.pc+1] if self.stack.pop()==0 else self.pc+2; continue
-            elif op == JNZ: self.pc = program[self.pc+1] if self.stack.pop()!=0 else self.pc+2; continue
-            elif op == CMP_EQ: b,a = self.stack.pop(),self.stack.pop(); self.stack.append(1 if a==b else 0)
-            elif op == CMP_LT: b,a = self.stack.pop(),self.stack.pop(); self.stack.append(1 if a<b else 0)
-            elif op == CMP_GT: b,a = self.stack.pop(),self.stack.pop(); self.stack.append(1 if a>b else 0)
-            elif op == HALT: self.running = False
-            self.pc += 1
-        return self.stack
-
-if __name__ == '__main__':
-    vm = VM()
-    # Compute 10! (factorial)
-    # Push 10, then loop: dup, push 1, sub, swap, mul, dup, push 1, gt, jnz
-    prog = [PUSH,10, PUSH,1,  # stack: [10, 1] (counter, accumulator)
-            SWAP, DUP, PUSH,1, SUB,  # counter-1
-            SWAP,  # bring acc up
-            PUSH,2,  # placeholder
-            DUP,  # dup acc for mul  
-            ]
-    # Simpler: just compute 3+4*2
-    prog = [PUSH,3, PUSH,4, PUSH,2, MUL, ADD, PRINT, HALT]
-    trace = '--trace' in sys.argv
-    print("Bytecode VM Demo: 3 + 4*2\n")
-    vm.run(prog, trace)
-    print(f"\nFinal stack: {vm.stack}")
+    def __init__(self,code):
+        self.code=code; self.stack=[]; self.ip=0
+        self.locals=[0]*256; self.callstack=[]; self.output=[]
+    def run(self):
+        while self.ip<len(self.code):
+            op=self.code[self.ip]; self.ip+=1
+            if op==OP_PUSH: self.stack.append(self.code[self.ip]); self.ip+=1
+            elif op==OP_POP: self.stack.pop()
+            elif op==OP_ADD: b,a=self.stack.pop(),self.stack.pop(); self.stack.append(a+b)
+            elif op==OP_SUB: b,a=self.stack.pop(),self.stack.pop(); self.stack.append(a-b)
+            elif op==OP_MUL: b,a=self.stack.pop(),self.stack.pop(); self.stack.append(a*b)
+            elif op==OP_DIV: b,a=self.stack.pop(),self.stack.pop(); self.stack.append(a//b)
+            elif op==OP_MOD: b,a=self.stack.pop(),self.stack.pop(); self.stack.append(a%b)
+            elif op==OP_DUP: self.stack.append(self.stack[-1])
+            elif op==OP_SWAP: self.stack[-1],self.stack[-2]=self.stack[-2],self.stack[-1]
+            elif op==OP_PRINT: self.output.append(str(self.stack.pop()))
+            elif op==OP_HALT: break
+            elif op==OP_JMP: self.ip=self.code[self.ip]
+            elif op==OP_JZ: addr=self.code[self.ip]; self.ip=addr if self.stack.pop()==0 else self.ip+1
+            elif op==OP_JNZ: addr=self.code[self.ip]; self.ip=addr if self.stack.pop()!=0 else self.ip+1
+            elif op==OP_EQ: b,a=self.stack.pop(),self.stack.pop(); self.stack.append(1 if a==b else 0)
+            elif op==OP_LT: b,a=self.stack.pop(),self.stack.pop(); self.stack.append(1 if a<b else 0)
+            elif op==OP_GT: b,a=self.stack.pop(),self.stack.pop(); self.stack.append(1 if a>b else 0)
+            elif op==OP_LOAD: self.stack.append(self.locals[self.code[self.ip]]); self.ip+=1
+            elif op==OP_STORE: self.locals[self.code[self.ip]]=self.stack.pop(); self.ip+=1
+            elif op==OP_CALL: self.callstack.append(self.ip+1); self.ip=self.code[self.ip]
+            elif op==OP_RET: self.ip=self.callstack.pop()
+        return self.output
+def main():
+    # Compute 1+2+...+10
+    code=[
+        OP_PUSH,0,OP_STORE,0,   # sum=0
+        OP_PUSH,1,OP_STORE,1,   # i=1
+        # loop (ip=8):
+        OP_LOAD,1,OP_PUSH,11,OP_LT,  # i<11?
+        OP_JZ,30,                # if not, jump to end
+        OP_LOAD,0,OP_LOAD,1,OP_ADD,OP_STORE,0,  # sum+=i
+        OP_LOAD,1,OP_PUSH,1,OP_ADD,OP_STORE,1,  # i++
+        OP_JMP,8,                # loop
+        # end (ip=30):
+        OP_LOAD,0,OP_PRINT,OP_HALT
+    ]
+    vm=VM(code); out=vm.run()
+    print(f"Sum 1..10 = {out[0]}")
+    # Factorial 5
+    code2=[
+        OP_PUSH,5,OP_STORE,0,  # n=5
+        OP_PUSH,1,OP_STORE,1,  # result=1
+        # loop (ip=8):
+        OP_LOAD,0,OP_PUSH,0,OP_GT,
+        OP_JZ,26,
+        OP_LOAD,1,OP_LOAD,0,OP_MUL,OP_STORE,1,
+        OP_LOAD,0,OP_PUSH,1,OP_SUB,OP_STORE,0,
+        OP_JMP,8,
+        # end (ip=26):
+        OP_LOAD,1,OP_PRINT,OP_HALT
+    ]
+    vm2=VM(code2); out2=vm2.run()
+    print(f"5! = {out2[0]}")
+if __name__=="__main__": main()
