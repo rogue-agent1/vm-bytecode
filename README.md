@@ -1,11 +1,13 @@
-# vm-bytecode
+# Vm Bytecode
 
-Stack-based bytecode virtual machine.""".
-
-Zero dependencies. Python 3.8+.
+Stack-based virtual machine with bytecode.
 
 ## Usage
 
 ```bash
-python3 vm_bytecode.py --help
+python3 vm_bytecode.py
 ```
+
+## License
+
+MIT
