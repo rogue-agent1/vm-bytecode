@@ -1,6 +1,6 @@
-# vm_bytecode
+# Bytecode Virtual Machine
 
-Stack-based virtual machine — bytecode interpreter
+Bytecode Virtual Machine — zero-dependency, single-file Python CLI.
 
 ## Usage
 
